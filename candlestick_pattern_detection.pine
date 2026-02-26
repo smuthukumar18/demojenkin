@@ -1,0 +1,151 @@
+// This Pine Script™ is subject to the terms of the Mozilla Public License 2.0
+// https://mozilla.org/MPL/2.0/
+// © Candlestick Pattern Detection
+//
+// Detects two swing-structure patterns:
+//   Bullish: Low → High → Lower Low → Higher High  (market structure shift up)
+//   Bearish: High → Low → Higher High → Lower Low   (market structure shift down)
+
+//@version=6
+indicator("Swing Structure Pattern Detection", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// ─── Inputs ──────────────────────────────────────────────────────────────────
+swingLen        = input.int(5,     "Swing Lookback Length",  minval=2, maxval=50,  tooltip="Number of bars on each side to confirm a swing pivot")
+bullColor       = input.color(color.green,  "Bullish Pattern Color")
+bearColor       = input.color(color.red,    "Bearish Pattern Color")
+showLabels      = input.bool(true, "Show Labels")
+showLines       = input.bool(true, "Show Connector Lines")
+showBgHighlight = input.bool(true, "Highlight Pattern Zone")
+alertOnBullish  = input.bool(true, "Alert on Bullish Pattern")
+alertOnBearish  = input.bool(true, "Alert on Bearish Pattern")
+
+// ─── Swing Detection ─────────────────────────────────────────────────────────
+// Pivot highs and lows with the given lookback
+pivotHigh = ta.pivothigh(high, swingLen, swingLen)
+pivotLow  = ta.pivotlow(low, swingLen, swingLen)
+
+// We store the four most recent swing points (price + bar index) in arrays.
+// Each swing point records whether it is a High (true) or Low (false).
+var float[] swingPrices   = array.new_float(0)
+var int[]   swingBars     = array.new_int(0)
+var bool[]  swingIsHigh   = array.new_bool(0)
+
+// Track pattern occurrences
+var int lastBullBar = -1
+var int lastBearBar = -1
+
+// ─── Record new swing points ────────────────────────────────────────────────
+// Pivot detection is confirmed `swingLen` bars ago, so the actual bar is
+// bar_index - swingLen.
+if not na(pivotHigh)
+    array.push(swingPrices,  pivotHigh)
+    array.push(swingBars,    bar_index - swingLen)
+    array.push(swingIsHigh,  true)
+    // Keep only the last 10 swings to save memory
+    if array.size(swingPrices) > 10
+        array.shift(swingPrices)
+        array.shift(swingBars)
+        array.shift(swingIsHigh)
+
+if not na(pivotLow)
+    array.push(swingPrices,  pivotLow)
+    array.push(swingBars,    bar_index - swingLen)
+    array.push(swingIsHigh,  false)
+    if array.size(swingPrices) > 10
+        array.shift(swingPrices)
+        array.shift(swingBars)
+        array.shift(swingIsHigh)
+
+// ─── Pattern Matching ────────────────────────────────────────────────────────
+// We need at least 4 swing points to check a pattern.
+int sz = array.size(swingPrices)
+
+// Bullish Pattern:  Low(1) → High(2) → Lower Low(3) → Higher High(4)
+//   Swing 1: isLow,   Swing 2: isHigh,  Swing 3: isLow,   Swing 4: isHigh
+//   price3 < price1  AND  price4 > price2
+bool bullishDetected = false
+
+if sz >= 4
+    float p1 = array.get(swingPrices, sz - 4)
+    float p2 = array.get(swingPrices, sz - 3)
+    float p3 = array.get(swingPrices, sz - 2)
+    float p4 = array.get(swingPrices, sz - 1)
+    int   b1 = array.get(swingBars,   sz - 4)
+    int   b2 = array.get(swingBars,   sz - 3)
+    int   b3 = array.get(swingBars,   sz - 2)
+    int   b4 = array.get(swingBars,   sz - 1)
+    bool  h1 = array.get(swingIsHigh, sz - 4)
+    bool  h2 = array.get(swingIsHigh, sz - 3)
+    bool  h3 = array.get(swingIsHigh, sz - 2)
+    bool  h4 = array.get(swingIsHigh, sz - 1)
+
+    // ── Bullish: Low → High → Lower Low → Higher High ──
+    if (not h1) and h2 and (not h3) and h4
+        if p3 < p1 and p4 > p2 and b4 != lastBullBar
+            bullishDetected := true
+            lastBullBar := b4
+
+            if showLines
+                line.new(b1, p1, b2, p2, color=bullColor, width=2, style=line.style_solid)
+                line.new(b2, p2, b3, p3, color=bullColor, width=2, style=line.style_solid)
+                line.new(b3, p3, b4, p4, color=bullColor, width=2, style=line.style_solid)
+
+            if showLabels
+                label.new(b1, p1, "Low",        style=label.style_label_up,   color=bullColor, textcolor=color.white, size=size.small)
+                label.new(b2, p2, "High",        style=label.style_label_down, color=bullColor, textcolor=color.white, size=size.small)
+                label.new(b3, p3, "Lower\nLow",  style=label.style_label_up,   color=bullColor, textcolor=color.white, size=size.small)
+                label.new(b4, p4, "Higher\nHigh", style=label.style_label_down, color=bullColor, textcolor=color.white, size=size.small)
+
+// Bearish Pattern:  High(1) → Low(2) → Higher High(3) → Lower Low(4)
+//   Swing 1: isHigh,  Swing 2: isLow,   Swing 3: isHigh,  Swing 4: isLow
+//   price3 > price1  AND  price4 < price2
+bool bearishDetected = false
+
+if sz >= 4
+    float p1b = array.get(swingPrices, sz - 4)
+    float p2b = array.get(swingPrices, sz - 3)
+    float p3b = array.get(swingPrices, sz - 2)
+    float p4b = array.get(swingPrices, sz - 1)
+    int   b1b = array.get(swingBars,   sz - 4)
+    int   b2b = array.get(swingBars,   sz - 3)
+    int   b3b = array.get(swingBars,   sz - 2)
+    int   b4b = array.get(swingBars,   sz - 1)
+    bool  h1b = array.get(swingIsHigh, sz - 4)
+    bool  h2b = array.get(swingIsHigh, sz - 3)
+    bool  h3b = array.get(swingIsHigh, sz - 2)
+    bool  h4b = array.get(swingIsHigh, sz - 1)
+
+    // ── Bearish: High → Low → Higher High → Lower Low ──
+    if h1b and (not h2b) and h3b and (not h4b)
+        if p3b > p1b and p4b < p2b and b4b != lastBearBar
+            bearishDetected := true
+            lastBearBar := b4b
+
+            if showLines
+                line.new(b1b, p1b, b2b, p2b, color=bearColor, width=2, style=line.style_solid)
+                line.new(b2b, p2b, b3b, p3b, color=bearColor, width=2, style=line.style_solid)
+                line.new(b3b, p3b, b4b, p4b, color=bearColor, width=2, style=line.style_solid)
+
+            if showLabels
+                label.new(b1b, p1b, "High",       style=label.style_label_down, color=bearColor, textcolor=color.white, size=size.small)
+                label.new(b2b, p2b, "Low",         style=label.style_label_up,   color=bearColor, textcolor=color.white, size=size.small)
+                label.new(b3b, p3b, "Higher\nHigh", style=label.style_label_down, color=bearColor, textcolor=color.white, size=size.small)
+                label.new(b4b, p4b, "Lower\nLow",  style=label.style_label_up,   color=bearColor, textcolor=color.white, size=size.small)
+
+// ─── Background Highlight ────────────────────────────────────────────────────
+bgcolor(showBgHighlight and bullishDetected ? color.new(bullColor, 90) : na, title="Bullish Zone")
+bgcolor(showBgHighlight and bearishDetected ? color.new(bearColor, 90) : na, title="Bearish Zone")
+
+// ─── Alerts ──────────────────────────────────────────────────────────────────
+alertcondition(bullishDetected and alertOnBullish, title="Bullish Structure Shift", message="Bullish pattern detected: Low → High → Lower Low → Higher High")
+alertcondition(bearishDetected and alertOnBearish, title="Bearish Structure Shift", message="Bearish pattern detected: High → Low → Higher High → Lower Low")
+
+// ─── Info Table ──────────────────────────────────────────────────────────────
+var table infoTable = table.new(position.top_right, 2, 3, bgcolor=color.new(color.gray, 85), border_width=1)
+if barstate.islast
+    table.cell(infoTable, 0, 0, "Pattern",          text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 0, "Structure",         text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 1, "Bullish",           text_color=bullColor,   text_size=size.small)
+    table.cell(infoTable, 1, 1, "L → H → LL → HH",  text_color=bullColor,   text_size=size.small)
+    table.cell(infoTable, 0, 2, "Bearish",           text_color=bearColor,   text_size=size.small)
+    table.cell(infoTable, 1, 2, "H → L → HH → LL",  text_color=bearColor,   text_size=size.small)
