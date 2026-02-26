@@ -7,7 +7,7 @@
 //   Bearish: High → Low → Higher High → Lower Low   (market structure shift down)
 
 //@version=6
-indicator("Swing Structure Pattern Detection", overlay=true, max_lines_count=500, max_labels_count=500)
+indicator("Swing Structure Pattern Detection", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=500)
 
 // ─── Inputs ──────────────────────────────────────────────────────────────────
 swingLen        = input.int(5,     "Swing Lookback Length",  minval=2, maxval=50,  tooltip="Number of bars on each side to confirm a swing pivot")
@@ -16,6 +16,8 @@ bearColor       = input.color(color.red,    "Bearish Pattern Color")
 showLabels      = input.bool(true, "Show Labels")
 showLines       = input.bool(true, "Show Connector Lines")
 showBgHighlight = input.bool(true, "Highlight Pattern Zone")
+showZones       = input.bool(true, "Show Flow Zones")
+zoneExtendBars  = input.int(50,    "Zone Extension (bars)", minval=5, maxval=500, tooltip="How many bars to extend the flow zone to the right")
 alertOnBullish  = input.bool(true, "Alert on Bullish Pattern")
 alertOnBearish  = input.bool(true, "Alert on Bearish Pattern")
 
@@ -24,11 +26,14 @@ alertOnBearish  = input.bool(true, "Alert on Bearish Pattern")
 pivotHigh = ta.pivothigh(high, swingLen, swingLen)
 pivotLow  = ta.pivotlow(low, swingLen, swingLen)
 
-// We store the four most recent swing points (price + bar index) in arrays.
+// We store the most recent swing points (price + bar index) in arrays.
 // Each swing point records whether it is a High (true) or Low (false).
-var float[] swingPrices   = array.new_float(0)
-var int[]   swingBars     = array.new_int(0)
-var bool[]  swingIsHigh   = array.new_bool(0)
+// We also store the full candle high/low at each swing bar for zone drawing.
+var float[] swingPrices      = array.new_float(0)
+var int[]   swingBars        = array.new_int(0)
+var bool[]  swingIsHigh      = array.new_bool(0)
+var float[] swingCandleHighs = array.new_float(0)
+var float[] swingCandleLows  = array.new_float(0)
 
 // Track pattern occurrences
 var int lastBullBar = -1
@@ -38,23 +43,31 @@ var int lastBearBar = -1
 // Pivot detection is confirmed `swingLen` bars ago, so the actual bar is
 // bar_index - swingLen.
 if not na(pivotHigh)
-    array.push(swingPrices,  pivotHigh)
-    array.push(swingBars,    bar_index - swingLen)
-    array.push(swingIsHigh,  true)
+    array.push(swingPrices,     pivotHigh)
+    array.push(swingBars,       bar_index - swingLen)
+    array.push(swingIsHigh,     true)
+    array.push(swingCandleHighs, high[swingLen])
+    array.push(swingCandleLows,  low[swingLen])
     // Keep only the last 10 swings to save memory
     if array.size(swingPrices) > 10
         array.shift(swingPrices)
         array.shift(swingBars)
         array.shift(swingIsHigh)
+        array.shift(swingCandleHighs)
+        array.shift(swingCandleLows)
 
 if not na(pivotLow)
-    array.push(swingPrices,  pivotLow)
-    array.push(swingBars,    bar_index - swingLen)
-    array.push(swingIsHigh,  false)
+    array.push(swingPrices,     pivotLow)
+    array.push(swingBars,       bar_index - swingLen)
+    array.push(swingIsHigh,     false)
+    array.push(swingCandleHighs, high[swingLen])
+    array.push(swingCandleLows,  low[swingLen])
     if array.size(swingPrices) > 10
         array.shift(swingPrices)
         array.shift(swingBars)
         array.shift(swingIsHigh)
+        array.shift(swingCandleHighs)
+        array.shift(swingCandleLows)
 
 // ─── Pattern Matching ────────────────────────────────────────────────────────
 // We need at least 4 swing points to check a pattern.
@@ -96,6 +109,15 @@ if sz >= 4
                 label.new(b3, p3, "Lower\nLow",  style=label.style_label_up,   color=bullColor, textcolor=color.white, size=size.small)
                 label.new(b4, p4, "Higher\nHigh", style=label.style_label_down, color=bullColor, textcolor=color.white, size=size.small)
 
+            // ── Bullish Flow Zone: mark top & bottom of the Lower Low candle ──
+            if showZones
+                float llCandleHigh = array.get(swingCandleHighs, sz - 2)
+                float llCandleLow  = array.get(swingCandleLows,  sz - 2)
+                int   zoneRight    = b3 + zoneExtendBars
+                line upperLine = line.new(b3, llCandleHigh, zoneRight, llCandleHigh, color=bullColor, width=1, style=line.style_solid)
+                line lowerLine = line.new(b3, llCandleLow,  zoneRight, llCandleLow,  color=bullColor, width=1, style=line.style_solid)
+                linefill.new(upperLine, lowerLine, color=color.new(bullColor, 85))
+
 // Bearish Pattern:  High(1) → Low(2) → Higher High(3) → Lower Low(4)
 //   Swing 1: isHigh,  Swing 2: isLow,   Swing 3: isHigh,  Swing 4: isLow
 //   price3 > price1  AND  price4 < price2
@@ -131,6 +153,15 @@ if sz >= 4
                 label.new(b2b, p2b, "Low",         style=label.style_label_up,   color=bearColor, textcolor=color.white, size=size.small)
                 label.new(b3b, p3b, "Higher\nHigh", style=label.style_label_down, color=bearColor, textcolor=color.white, size=size.small)
                 label.new(b4b, p4b, "Lower\nLow",  style=label.style_label_up,   color=bearColor, textcolor=color.white, size=size.small)
+
+            // ── Bearish Flow Zone: mark top & bottom of the Higher High candle ──
+            if showZones
+                float hhCandleHigh = array.get(swingCandleHighs, sz - 2)
+                float hhCandleLow  = array.get(swingCandleLows,  sz - 2)
+                int   zoneRightB   = b3b + zoneExtendBars
+                line upperLineB = line.new(b3b, hhCandleHigh, zoneRightB, hhCandleHigh, color=bearColor, width=1, style=line.style_solid)
+                line lowerLineB = line.new(b3b, hhCandleLow,  zoneRightB, hhCandleLow,  color=bearColor, width=1, style=line.style_solid)
+                linefill.new(upperLineB, lowerLineB, color=color.new(bearColor, 85))
 
 // ─── Background Highlight ────────────────────────────────────────────────────
 bgcolor(showBgHighlight and bullishDetected ? color.new(bullColor, 90) : na, title="Bullish Zone")
