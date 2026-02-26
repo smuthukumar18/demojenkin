@@ -11,6 +11,8 @@ indicator("Swing Structure Pattern Detection", overlay=true, max_lines_count=500
 
 // ─── Inputs ──────────────────────────────────────────────────────────────────
 swingLen        = input.int(5,     "Swing Lookback Length",  minval=2, maxval=50,  tooltip="Number of bars on each side to confirm a swing pivot")
+showBullish     = input.bool(true, "Show Bullish Structure",  tooltip="Enable or disable the entire bullish pattern (labels, lines, zones, alerts)")
+showBearish     = input.bool(true, "Show Bearish Structure",  tooltip="Enable or disable the entire bearish pattern (labels, lines, zones, alerts)")
 bullColor       = input.color(color.green,  "Bullish Pattern Color")
 bearColor       = input.color(color.red,    "Bearish Pattern Color")
 showLabels      = input.bool(true, "Show Labels")
@@ -93,7 +95,7 @@ if sz >= 4
     bool  h4 = array.get(swingIsHigh, sz - 1)
 
     // ── Bullish: Low → High → Lower Low → Higher High ──
-    if (not h1) and h2 and (not h3) and h4
+    if showBullish and (not h1) and h2 and (not h3) and h4
         if p3 < p1 and p4 > p2 and b4 != lastBullBar
             bullishDetected := true
             lastBullBar := b4
@@ -138,7 +140,7 @@ if sz >= 4
     bool  h4b = array.get(swingIsHigh, sz - 1)
 
     // ── Bearish: High → Low → Higher High → Lower Low ──
-    if h1b and (not h2b) and h3b and (not h4b)
+    if showBearish and h1b and (not h2b) and h3b and (not h4b)
         if p3b > p1b and p4b < p2b and b4b != lastBearBar
             bearishDetected := true
             lastBearBar := b4b
@@ -164,12 +166,12 @@ if sz >= 4
                 linefill.new(upperLineB, lowerLineB, color=color.new(bearColor, 85))
 
 // ─── Background Highlight ────────────────────────────────────────────────────
-bgcolor(showBgHighlight and bullishDetected ? color.new(bullColor, 90) : na, title="Bullish Zone")
-bgcolor(showBgHighlight and bearishDetected ? color.new(bearColor, 90) : na, title="Bearish Zone")
+bgcolor(showBullish and showBgHighlight and bullishDetected ? color.new(bullColor, 90) : na, title="Bullish Zone")
+bgcolor(showBearish and showBgHighlight and bearishDetected ? color.new(bearColor, 90) : na, title="Bearish Zone")
 
 // ─── Alerts ──────────────────────────────────────────────────────────────────
-alertcondition(bullishDetected and alertOnBullish, title="Bullish Structure Shift", message="Bullish pattern detected: Low → High → Lower Low → Higher High")
-alertcondition(bearishDetected and alertOnBearish, title="Bearish Structure Shift", message="Bearish pattern detected: High → Low → Higher High → Lower Low")
+alertcondition(showBullish and bullishDetected and alertOnBullish, title="Bullish Structure Shift", message="Bullish pattern detected: Low → High → Lower Low → Higher High")
+alertcondition(showBearish and bearishDetected and alertOnBearish, title="Bearish Structure Shift", message="Bearish pattern detected: High → Low → Higher High → Lower Low")
 
 // ─── Info Table ──────────────────────────────────────────────────────────────
 var table infoTable = table.new(position.top_right, 2, 3, bgcolor=color.new(color.gray, 85), border_width=1)
